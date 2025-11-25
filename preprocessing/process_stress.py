@@ -40,7 +40,7 @@ def calc_cold_stress(ta, ws):
 
     return stress.clip(lower=0)
 
-df = pd.read_csv("data/청주_열공급량_기상변수_corona_추가.csv", encoding='utf-8-sig')
+df = pd.read_csv("../data/청주_열공급량_기상변수_corona_추가.csv", encoding='utf-8-sig')
 df['datetime'] = pd.to_datetime(df['datetime'])
 df['month'] = df['datetime'].dt.month
 
@@ -64,4 +64,4 @@ if is_winter.any():
     df.loc[is_winter & invalid_condition, 'cold_stress'] = 0
 
 print(df[['datetime', '기온(°C)', '상대습도(%)', '풍속(m/s)', 'heat_stress', 'cold_stress']].head())
-df.to_csv('weather_data_with_feel.csv', index=False, encoding='utf-8-sig')
+df.to_csv('../data/weather_data_with_feel.csv', index=False, encoding='utf-8-sig')
