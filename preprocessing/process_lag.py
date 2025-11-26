@@ -28,14 +28,12 @@ def add_time_features(df, datetime_col='datetime'):
     wd_col='풍향(16방위)'
     ws_col='풍속(m/s)'
 
-
-    # 해당 월의 총 일수 (28, 29, 30, 31 중 하나)
-    days_in_month = dt.dt.days_in_month
-
     # 해당 연도가 윤년인지 여부 (True/False)
     is_leap = dt.dt.is_leap_year
     # 연도의 총 일수: 윤년이면 366, 아니면 365
     days_in_year = np.where(is_leap, 366, 365)
+    # 해당 월의 총 일수 (28, 29, 30, 31 중 하나)
+    days_in_month = dt.dt.days_in_month
 
     # 3) 월(month) 주기 인코딩 (12개월 주기)
     theta_month = 2 * np.pi * (df['month'] - 1) / 12.0
@@ -63,14 +61,13 @@ def add_time_features(df, datetime_col='datetime'):
     df['weekday_sin'] = np.sin(theta_wd)
     df['weekday_cos'] = np.cos(theta_wd)
 
-
     #풍속변환
     theta = np.deg2rad(df[wd_col])
     # 성분 계산
     df['wind_x'] = df[ws_col] * np.sin(theta)
     df['wind_y'] = df[ws_col] * np.cos(theta)
 
-
+    # 불필요한 임시 컬럼 삭제
     df.drop(columns=['month'], inplace=True)
     df.drop(columns=['day'], inplace=True)
     df.drop(columns=['hour'], inplace=True)

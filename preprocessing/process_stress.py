@@ -9,9 +9,7 @@ def get_wet_bulb_temp(ta, hm):
     term2 = np.arctan(ta + hm)
     term3 = np.arctan(hm - 1.67633)
     term4 = 0.00391838 * np.power(hm, 1.5) * np.arctan(0.023101 * hm)
-
-    tw = term1 + term2 - term3 + term4 - 4.686035
-    return tw
+    return term1 + term2 - term3 + term4 - 4.686035
 
 def calc_heat_stress(ta, hm):
     """
@@ -40,7 +38,7 @@ def calc_cold_stress(ta, ws):
 
     return stress.clip(lower=0)
 
-df = pd.read_csv("../data/청주_열공급량_기상변수_corona_추가.csv", encoding='utf-8-sig')
+df = pd.read_csv("../data/청주_열공급량_기상변수_lag추가.csv", encoding='utf-8-sig')
 df['datetime'] = pd.to_datetime(df['datetime'])
 df['month'] = df['datetime'].dt.month
 
