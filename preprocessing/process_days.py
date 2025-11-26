@@ -15,4 +15,7 @@ temp_dates = df['datetime'].dt.date # 연,월,일만 추출
 df['is_holiday'] = temp_dates.isin(kr_holidays)
 
 print(df[['datetime', 'is_cold', 'is_weekend', 'is_holiday']].head(10))
-df.to_csv("../data/weather_data_with_holiday.csv", index=False, encoding='utf-8-sig')
+
+df['rn_day'] = df.groupby(df['datetime'].dt.date)['강수량(mm)'].cumsum().round(2)
+
+df.to_csv("../data/weather_data_with_holiday_and_rn_day.csv", index=False, encoding='utf-8-sig')
