@@ -4,7 +4,8 @@ import lightgbm as lgb
 from lightgbm import early_stopping, log_evaluation
 from sklearn.preprocessing import StandardScaler
 import joblib
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import matplotlib.pyplot as plt
 
 # -------------------------------------------------
 # 1. CSV 읽기 + 최근 30000개만 사용
@@ -100,6 +101,29 @@ print("MAE:", mae)
 mse = mean_squared_error(y_2021, y_pred)
 rmse = np.sqrt(mse)
 print(f"RMSE: {rmse}")
+
+print("실 데이터 통계치 확인 === ")
+y_mean = np.mean(y_2021)
+print(f"실제 값 평균(Mean): {y_mean:.4f}")
+print(f"실제 값 최소~최대: {np.min(y_2021):.4f} ~ {np.max(y_2021):.4f}")
+
+# 퍼센트 오차(MAPE) 대략 계산 (평균 대비 오차율)
+mape_approx = (mae / y_mean) * 100
+print(f"평균 대비 오차율(Approx MAPE): {mape_approx:.2f}%")
+
+# R2 Score (설명력)
+r2 = r2_score(y_2021, y_pred)
+print(f"R2 Score: {r2:.4f}")
+
+# -------------------------------------------------
+# 시각화 - 앞부분 100개만
+# -------------------------------------------------
+plt.figure(figsize=(15, 6))
+plt.plot(y_2021[:150], label='Actual', color='blue', alpha=0.7)
+plt.plot(y_pred[:150], label='Prediction', color='red', linestyle='--', alpha=0.7)
+plt.title(f'Actual vs Prediction (MAE: {mae:.2f}, RMSE: {rmse:.2f})')
+plt.legend()
+plt.show()
 
 # 7. 저장
 base_path = "../model/"
