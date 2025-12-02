@@ -6,6 +6,7 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import matplotlib.pyplot as plt
+import optuna
 
 # -------------------------------------------------
 # 1. CSV 읽기 + 최근 30000개만 사용
@@ -75,6 +76,54 @@ params = {
     "random_state": 42
 }
 
+def objective(trial):
+    tweedie_param = {
+        "objective": "tweedie",
+        "metric": "l1",
+        "verbosity": -1,
+        "boosting_type": "gbdt",
+        "random_state": 42,
+        "n_jobs": -1,
+        "feature_pre_filter": False,
+
+        # 1. Tweedie Power: 1.0(Poisson) ~ 2.0(Gamma) 사이 실수
+        "tweedie_variance_power": trial.suggest_float("tweedie_variance_power", 1.0, 1.9),
+
+        # 2. 학습률: 0.001 ~ 0.1 (로그 스케일로 탐색)
+        "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.1, log=True),
+
+        # 3. 트리 구조
+        "num_leaves": trial.suggest_int("num_leaves", 16, 128),
+        "max_depth": trial.suggest_int("max_depth", 3, 15),
+
+        # 4. 데이터 샘플링 (과적합 방지)
+        "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 10, 100), # 데이터 적으므로 작게 설정
+        "feature_fraction": trial.suggest_float("feature_fraction", 0.4, 1.0),
+        "bagging_fraction": trial.suggest_float("bagging_fraction", 0.4, 1.0),
+        "bagging_freq": trial.suggest_int("bagging_freq", 1, 7),
+
+        # 5. 규제 (Regularization)
+        "lambda_l1": trial.suggest_float("lambda_l1", 1e-8, 10.0, log=True),
+        "lambda_l2": trial.suggest_float("lambda_l2", 1e-8, 10.0, log=True),
+    }
+
+    pruning_callback = optuna.integration.LightGBMPruningCallback(trial, "l1")
+    model = lgb.train(
+        tweedie_param,
+        train_data,
+        num_boost_round=5000,           # 충분히 큰 값
+        valid_sets=[valid_data],
+        callbacks=[
+            lgb.early_stopping(stopping_rounds=100),
+            pruning_callback
+        ]
+    )
+
+    preds = model.predict(X_test)
+    mae = mean_absolute_error(y_test, preds)
+
+    return mae
+
 params_tweedie = {
     # 1. 핵심 목표 (Objective)
     "objective": "tweedie",
@@ -109,61 +158,74 @@ params_tweedie = {
     # "device_type": "gpu"            # GPU 사용 환경이라면 주석 해제
 }
 
+# 3. 스터디(Study) 생성 및 최적화 실행
+study = optuna.create_study(direction="minimize") # RMSE는 작을수록 좋으므로 minimize
+study.optimize(objective, n_trials=50) # 50번 시도 (시간 여유 있으면 100번 추천)
+
+# 4. 결과 확인
+print("="*50)
+print("Best RMSE:", study.best_value)
+print("Best Params:", study.best_params)
+print("="*50)
+
+# 5. 최적의 파라미터 저장
+best_params = study.best_params
+
 # -------------------------------------------------
 # 6. Train (callback 기반 early stopping)
 # -------------------------------------------------
-model = lgb.train(
-    params_tweedie,
-    train_data,
-    num_boost_round=5000,
-    valid_sets=[valid_data],
-
-    # ← early stopping 처리
-    callbacks=[
-        early_stopping(stopping_rounds=200),  # 200회 개선 없으면 stop
-        log_evaluation(200)                   # 200 iteration마다 로그 출력
-    ]
-)
-
-# -------------------------------------------------
-# 7. Predict
-# -------------------------------------------------
-y_pred = model.predict(X_2021_scaled)
-print("Sample predictions:", y_pred[:5])
-mae = mean_absolute_error(y_2021, y_pred)
-print("MAE:", mae)
-
-mse = mean_squared_error(y_2021, y_pred)
-rmse = np.sqrt(mse)
-print(f"RMSE: {rmse}")
-
-print("실 데이터 통계치 확인 === ")
-y_mean = np.mean(y_2021)
-# print(f"실제 값 평균(Mean): {y_mean:.4f}")
-# print(f"실제 값 최소~최대: {np.min(y_2021):.4f} ~ {np.max(y_2021):.4f}")
-
-# 퍼센트 오차(MAPE) 대략 계산 (평균 대비 오차율)
-mape_approx = (mae / y_mean) * 100
-print(f"평균 대비 오차율(Approx MAPE): {mape_approx:.2f}%")
-
-# R2 Score (설명력)
-r2 = r2_score(y_2021, y_pred)
-print(f"R2 Score: {r2:.4f}")
-
-# -------------------------------------------------
-# 시각화 - 앞부분 100개만
-# -------------------------------------------------
-plt.figure(figsize=(15, 6))
-plt.plot(y_2021[:150], label='Actual', color='blue', alpha=0.7)
-plt.plot(y_pred[:150], label='Prediction', color='red', linestyle='--', alpha=0.7)
-plt.title(f'Actual vs Prediction (MAE: {mae:.2f}, RMSE: {rmse:.2f})')
-plt.legend()
-plt.show()
-
-# 7. 저장
-base_path = "../model/"
-model_path = base_path + "lgb_model_tweedie.pkl"
-scaler_path = base_path + "lgb_scaler_tweedie.pkl"
-joblib.dump(model, model_path)
-joblib.dump(scaler2, scaler_path)
-print("모델과 스케일러가 저장됐습니다.")
+# model = lgb.train(
+#     params_tweedie,
+#     train_data,
+#     num_boost_round=5000,
+#     valid_sets=[valid_data],
+#
+#     # ← early stopping 처리
+#     callbacks=[
+#         early_stopping(stopping_rounds=200),  # 200회 개선 없으면 stop
+#         log_evaluation(200)                   # 200 iteration마다 로그 출력
+#     ]
+# )
+#
+# # -------------------------------------------------
+# # 7. Predict
+# # -------------------------------------------------
+# y_pred = model.predict(X_2021_scaled)
+# print("Sample predictions:", y_pred[:5])
+# mae = mean_absolute_error(y_2021, y_pred)
+# print("MAE:", mae)
+#
+# mse = mean_squared_error(y_2021, y_pred)
+# rmse = np.sqrt(mse)
+# print(f"RMSE: {rmse}")
+#
+# print("실 데이터 통계치 확인 === ")
+# y_mean = np.mean(y_2021)
+# # print(f"실제 값 평균(Mean): {y_mean:.4f}")
+# # print(f"실제 값 최소~최대: {np.min(y_2021):.4f} ~ {np.max(y_2021):.4f}")
+#
+# # 퍼센트 오차(MAPE) 대략 계산 (평균 대비 오차율)
+# mape_approx = (mae / y_mean) * 100
+# print(f"평균 대비 오차율(Approx MAPE): {mape_approx:.2f}%")
+#
+# # R2 Score (설명력)
+# r2 = r2_score(y_2021, y_pred)
+# print(f"R2 Score: {r2:.4f}")
+#
+# # -------------------------------------------------
+# # 시각화 - 앞부분 100개만
+# # -------------------------------------------------
+# plt.figure(figsize=(15, 6))
+# plt.plot(y_2021[:150], label='Actual', color='blue', alpha=0.7)
+# plt.plot(y_pred[:150], label='Prediction', color='red', linestyle='--', alpha=0.7)
+# plt.title(f'Actual vs Prediction (MAE: {mae:.2f}, RMSE: {rmse:.2f})')
+# plt.legend()
+# plt.show()
+#
+# # 7. 저장
+# base_path = "../model/"
+# model_path = base_path + "lgb_model_tweedie.pkl"
+# scaler_path = base_path + "lgb_scaler_tweedie.pkl"
+# joblib.dump(model, model_path)
+# joblib.dump(scaler2, scaler_path)
+# print("모델과 스케일러가 저장됐습니다.")
