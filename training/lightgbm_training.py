@@ -87,8 +87,8 @@ params_tweedie = {
     "num_leaves": 81,                 # 표의 값: 81
     "max_depth": -1,                  # 표의 값: -1 (깊이 제한 없음)
     "max_bin": 255,                   # 표의 값: 255
-    "min_data_in_leaf": 1155,         # [주의] 표의 값: 1155 (데이터가 적으면 이 값을 줄여야 함!)
-    "min_sum_hessian_in_leaf": 0.1908, # 표의 값: 1.908 * 10^-1
+    "min_data_in_leaf": 80,         # [주의] 표의 값: 1155 (데이터가 적으면 이 값을 줄여야 함!)
+    "min_sum_hessian_in_leaf": 0.016, # 표의 값: 1.908 * 10^-1
 
     # 3. 학습률 및 반복 (Learning)
     "learning_rate": 0.01171,         # 표의 값: 1.171 * 10^-2
