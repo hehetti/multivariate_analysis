@@ -22,7 +22,7 @@ print(f"날짜 범위: {df_raw['datetime'].min()} ~ {df_raw['datetime'].max()}")
 df_test = df_raw[df_raw['datetime'] >= '2021-01-01'].copy().reset_index(drop=True)
 df = df_raw[df_raw['datetime']<'2021-01-01'].copy().reset_index(drop=True)
 
-df = df.iloc[168:].reset_index(drop=True)
+df = df.iloc[169:].reset_index(drop=True)
 
 print(f"전체 train&eval 데이터 개수: {len(df)}")
 print(f"날짜 범위: {df['datetime'].min()} ~ {df['datetime'].max()}")
@@ -31,9 +31,6 @@ print(f"날짜 범위: {df_test['datetime'].min()} ~ {df_test['datetime'].max()}
 
 y = df.iloc[:, 0].values
 X = df.iloc[:, 2:].values
-
-y_2021 = df_test.iloc[:, 0].values
-X_2021 = df_test.iloc[:, 2:].values
 
 test_size = len(df) // 4
 X_train, X_test = X[test_size:], X[:test_size]
@@ -44,7 +41,6 @@ scaler2.fit(X_train)
 
 X_train = scaler2.transform(X_train)
 X_test = scaler2.transform(X_test)
-X_2021_scaled = scaler2.transform(X_2021)
 
 # -------------------------------------------------
 # 2. 통합 Objective 함수 (모델 & Loss 선택)
@@ -98,7 +94,6 @@ def objective(trial):
             num_boost_round=5000,
             valid_sets=[valid_ds],
             callbacks=[lgb.early_stopping(stopping_rounds=100), pruning_callback],
-            verbose_eval=False
         )
         preds = model.predict(X_test)
 
@@ -140,7 +135,6 @@ def objective(trial):
             evals=[(dvalid, "valid")],
             early_stopping_rounds=100,
             callbacks=[pruning_callback],
-            verbose_eval=False
         )
         preds = model.predict(dvalid, iteration_range=(0, model.best_iteration + 1))
 
@@ -150,7 +144,7 @@ def objective(trial):
             "iterations": 5000,
             "eval_metric": "MAE",
             "random_seed": 42,
-            "verbose": 0,
+            "verbose": 100,
             "allow_writing_files": False,
             "learning_rate": trial.suggest_float("cat_lr", 0.001, 0.3, log=True),
             "depth": trial.suggest_int("cat_depth", 4, 10),

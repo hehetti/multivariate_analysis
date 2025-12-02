@@ -102,8 +102,8 @@ plt.show()
 # 6. 모델을 로컬에 저장
 # -------------------------------------------------
 base_path = "../../model/"
-model_path = base_path + "lgb_model_l2_optuna.pkl"
-scaler_path = base_path + "lgb_scaler_l2_optuna.pkl"
+model_path = base_path + "lgb_model.pkl"
+scaler_path = base_path + "lgb_scaler.pkl"
 joblib.dump(model, model_path)
 joblib.dump(scaler2, scaler_path)
 print("모델과 스케일러가 저장됐습니다.")
