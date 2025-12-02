@@ -1,13 +1,16 @@
 import pandas as pd
+import numpy as np
 import lightgbm as lgb
+from lightgbm import early_stopping, log_evaluation
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error
-import optuna
+import joblib
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import matplotlib.pyplot as plt
 
 # -------------------------------------------------
-# 1. CSV 읽기
+# 1. 데이터 구성
 # -------------------------------------------------
-file_path = "../data/final_heatmap_lag_without_leakage.csv"
+file_path = "../../data/final_heatmap_lag_without_leakage.csv"
 df_raw = pd.read_csv(file_path)
 
 # 실험 데이터셋(2021)과 분리
@@ -25,18 +28,12 @@ print(f"날짜 범위: {df['datetime'].min()} ~ {df['datetime'].max()}")
 print(f"test 데이터셋 개수: {len(df_test)}")
 print(f"날짜 범위: {df_test['datetime'].min()} ~ {df_test['datetime'].max()}")
 
-# -------------------------------------------------
-# 2. 첫 번째 열 = y, 나머지 = X
-# -------------------------------------------------
 y = df.iloc[:, 0].values
 X = df.iloc[:, 2:].values
 
 y_2021 = df_test.iloc[:, 0].values
 X_2021 = df_test.iloc[:, 2:].values
 
-# -------------------------------------------------
-# 3. Train/Test Split (앞쪽 1/4 test)
-# -------------------------------------------------
 test_size = len(df) // 4
 X_train, X_test = X[test_size:], X[:test_size]
 y_train, y_test = y[test_size:], y[:test_size]
@@ -49,105 +46,64 @@ X_test = scaler2.transform(X_test)
 
 X_2021_scaled = scaler2.transform(X_2021)
 
-# -------------------------------------------------
-# 4. Dataset 생성
-# -------------------------------------------------
 train_data = lgb.Dataset(X_train, label=y_train)
 valid_data = lgb.Dataset(X_test, label=y_test)
 
 # -------------------------------------------------
-# 5. 파라미터
+# 2. 파라미터 -> optuna에서 추출한 최적 파라미터로
 # -------------------------------------------------
-params = {
-    "objective": "regression_l2",   # ← MSE 기반 학습
-    "metric": "l1",
-    "learning_rate": 0.01,
-    "num_leaves": 100,
-    "feature_fraction": 0.9,
-    "bagging_fraction": 0.8,
-    "bagging_freq": 1,
-    "lambda_l2": 0.5,
-    "min_child_samples": 10,
-    "random_state": 42
-}
+params_l2 = {'learning_rate': 0.04209891275728966, 'num_leaves': 59, 'feature_fraction': 0.7300948366339031, 'bagging_fraction': 0.9811027608098394, 'bagging_freq': 5, 'lambda_l1': 1.0833737287677067e-07, 'lambda_l2': 2.658097575079241e-07, 'min_child_samples': 17}
 
-def objective(trial):
-    tweedie_param = {
-        "objective": "tweedie",
-        "metric": "l1",
-        "verbosity": -1,
-        "boosting_type": "gbdt",
-        "random_state": 42,
-        "n_jobs": -1,
-        "feature_pre_filter": False,
-
-        # 1. Tweedie Power: 1.0(Poisson) ~ 2.0(Gamma) 사이 실수
-        "tweedie_variance_power": trial.suggest_float("tweedie_variance_power", 1.0, 1.9),
-
-        # 2. 학습률: 0.001 ~ 0.1 (로그 스케일로 탐색)
-        "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.1, log=True),
-
-        # 3. 트리 구조
-        "num_leaves": trial.suggest_int("num_leaves", 16, 128),
-        "max_depth": trial.suggest_int("max_depth", 3, 15),
-
-        # 4. 데이터 샘플링 (과적합 방지)
-        "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 10, 100), # 데이터 적으므로 작게 설정
-        "feature_fraction": trial.suggest_float("feature_fraction", 0.4, 1.0),
-        "bagging_fraction": trial.suggest_float("bagging_fraction", 0.4, 1.0),
-        "bagging_freq": trial.suggest_int("bagging_freq", 1, 7),
-
-        # 5. 규제 (Regularization)
-        "lambda_l1": trial.suggest_float("lambda_l1", 1e-8, 10.0, log=True),
-        "lambda_l2": trial.suggest_float("lambda_l2", 1e-8, 10.0, log=True),
-    }
-    l2_param = {
-        "objective": "regression_l2",   # ← MSE 기반 학습
-        "metric": "l1",
-        "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.1, log=True),
-        "num_leaves": trial.suggest_int("num_leaves", 16, 128),
-        "feature_fraction": trial.suggest_float("feature_fraction", 0.4, 1.0),
-        "bagging_fraction": trial.suggest_float("bagging_fraction", 0.4, 1.0),
-        "bagging_freq": trial.suggest_int("bagging_freq", 1, 7),
-        "lambda_l1": trial.suggest_float("lambda_l1", 1e-8, 10.0, log=True),
-        "lambda_l2": trial.suggest_float("lambda_l2", 1e-8, 10.0, log=True),
-        "min_child_samples": trial.suggest_int("min_child_samples", 5, 30),
-        "feature_pre_filter": False,
-        "random_state": 42
-    }
-
-    pruning_callback = optuna.integration.LightGBMPruningCallback(trial, "l1")
-    model = lgb.train(
-        l2_param,
-        train_data,
-        num_boost_round=5000,           # 충분히 큰 값
-        valid_sets=[valid_data],
-        callbacks=[
-            lgb.early_stopping(stopping_rounds=100),
-            pruning_callback
-        ]
-    )
-
-    preds = model.predict(X_test)
-    mae = mean_absolute_error(y_test, preds)
-
-    return mae
+params_tweedie = {'tweedie_variance_power': 1.216613798570502, 'learning_rate': 0.02166082006547862, 'num_leaves': 96, 'max_depth': 14, 'min_data_in_leaf': 36, 'feature_fraction': 0.6635243528116432, 'bagging_fraction': 0.9821246548236764, 'bagging_freq': 1, 'lambda_l1': 1.9052833646205864e-08, 'lambda_l2': 1.7159611853713213e-07}
 
 # -------------------------------------------------
-# 6. 스터디(Study) 생성 및 최적화 실행
+# 3. 학습 (callback 기반 early stopping)
 # -------------------------------------------------
-study = optuna.create_study(direction="minimize") # RMSE는 작을수록 좋으므로 minimize
-study.optimize(objective, n_trials=50) # 50번 시도 -> 시간 여유있으면 100번 해볼 것
+model = lgb.train(
+    params_l2,
+    train_data,
+    num_boost_round=5000,
+    valid_sets=[valid_data],
+
+    # ← early stopping 처리
+    callbacks=[
+        early_stopping(stopping_rounds=200),  # 200회 개선 없으면 stop
+        log_evaluation(200)                   # 200 iteration마다 로그 출력
+    ]
+)
 
 # -------------------------------------------------
-# 7. 결과 확인
+# 4. 2021년 데이터 예측
 # -------------------------------------------------
-print("="*50)
-print("Best RMSE:", study.best_value)
-print("Best Params:", study.best_params)
-print("="*50)
+y_pred = model.predict(X_2021_scaled)
+print("Sample predictions:", y_pred[:5])
+
+mae = mean_absolute_error(y_2021, y_pred)
+mse = mean_squared_error(y_2021, y_pred); rmse = np.sqrt(mse)
+y_mean = np.mean(y_2021); mape_approx = (mae / y_mean) * 100 # 퍼센트 오차(MAPE) 근사치 계산 (평균 대비 오차율)
+r2 = r2_score(y_2021, y_pred) # R2 Score (설명력)
+
+print(f"MAE: {mae}")
+print(f"RMSE: {rmse}")
+print(f"MAPE(평균 대비 오차율): {mape_approx:.2f}%")
+print(f"R2 Score: {r2:.4f}")
 
 # -------------------------------------------------
-# 8. 최적의 파라미터 저장
+# 5. 시각화 - 앞부분 100개만
 # -------------------------------------------------
-best_params = study.best_params
+plt.figure(figsize=(15, 6))
+plt.plot(y_2021[:150], label='Actual', color='blue', alpha=0.7)
+plt.plot(y_pred[:150], label='Prediction', color='red', linestyle='--', alpha=0.7)
+plt.title(f'Actual vs Prediction (MAE: {mae:.2f}, RMSE: {rmse:.2f})')
+plt.legend()
+plt.show()
+
+# -------------------------------------------------
+# 6. 모델을 로컬에 저장
+# -------------------------------------------------
+base_path = "../../model/"
+model_path = base_path + "lgb_model_l2_optuna.pkl"
+scaler_path = base_path + "lgb_scaler_l2_optuna.pkl"
+joblib.dump(model, model_path)
+joblib.dump(scaler2, scaler_path)
+print("모델과 스케일러가 저장됐습니다.")
