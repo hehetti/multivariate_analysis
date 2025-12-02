@@ -1,8 +1,10 @@
 import pandas as pd
 import lightgbm as lgb
+import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error
 import optuna
+from catboost import CatBoostRegressor, Pool
 
 # -------------------------------------------------
 # 1. 데이터셋 준비
@@ -47,9 +49,9 @@ train_data = lgb.Dataset(X_train, label=y_train)
 valid_data = lgb.Dataset(X_test, label=y_test)
 
 # -------------------------------------------------
-# 2. 연습
+# 2. 하이퍼파라미터 시도
 # -------------------------------------------------
-def objective(trial):
+def lightgbm_objective(trial):
     tweedie_param = {
         "objective": "tweedie",
         "metric": "l1",
@@ -91,7 +93,8 @@ def objective(trial):
         "lambda_l2": trial.suggest_float("lambda_l2", 1e-8, 10.0, log=True),
         "min_child_samples": trial.suggest_int("min_child_samples", 5, 30),
         "feature_pre_filter": False,
-        "random_state": 42
+        "random_state": 42,
+        "verbosity": 0,         # 로그 출력 끔
     }
 
     pruning_callback = optuna.integration.LightGBMPruningCallback(trial, "l1")
@@ -107,6 +110,96 @@ def objective(trial):
     )
 
     preds = model.predict(X_test)
+    mae = mean_absolute_error(y_test, preds)
+
+    return mae
+
+def xgb_objective(trial):
+    xgboost_param = {
+        "objective": "reg:squarederror",
+        "eval_metric": "l1",
+        "tree_method": "hist",  # GPU 사용 시 "gpu_hist"
+        "random_state": 32,
+        "verbosity": 0,         # 로그 출력 끔
+
+        # 1. 학습률 (Learning Rate)
+        "eta": trial.suggest_float("eta", 0.001, 0.3, log=True),
+
+        # 2. 트리 구조 (Tree Structure)
+        "max_depth": trial.suggest_int("max_depth", 3, 12),
+        "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+
+        # 3. 샘플링 (Sampling)
+        "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+
+        # 4. 규제 (Regularization)
+        "lambda": trial.suggest_float("lambda", 1e-8, 10.0, log=True),
+        "alpha": trial.suggest_float("alpha", 1e-8, 10.0, log=True),
+    }
+
+    pruning_callback = optuna.integration.XGBoostPruningCallback(trial, "valid-mae")
+    model = xgb.train(
+        params=xgboost_param,
+        dtrain=train_data,
+        num_boost_round=5000,
+        evals=[(valid_data, "valid")],
+        early_stopping_rounds=100,
+        callbacks=[pruning_callback],
+        verbose_eval=False
+    )
+
+    preds = model.predict(X_test)
+    mae = mean_absolute_error(y_test, preds)
+
+    return mae
+
+def cat_objective(trial):
+    param = {
+        "iterations": 5000,
+        "loss_function": "RMSE",
+        "eval_metric": "MAE",
+        "random_seed": 42,
+        "bootstrap_type": "Bernoulli", # subsample을 쓰기 위해 설정
+        "verbose": 0,                  # 로그 출력 끔
+        "allow_writing_files": False,  # 불필요한 파일 생성 방지
+
+        # 1. 학습률
+        "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.3, log=True),
+
+        # 2. 트리 구조
+        "depth": trial.suggest_int("depth", 4, 10),
+
+        # 3. 규제
+        "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1e-8, 10.0, log=True),
+
+        # 4. 샘플링
+        "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+
+        # 5. 추가 파라미터 (선택 사항)
+        "random_strength": trial.suggest_float("random_strength", 1e-8, 10.0, log=True),
+    }
+
+    # CatBoostRegressor 객체 생성
+    model = CatBoostRegressor(**param)
+
+    # Pruning Callback 설정
+    pruning_callback = optuna.integration.CatBoostPruningCallback(trial, "MAE")
+
+    # 학습 (Pool 객체 사용 권장)
+    train_pool = Pool(X_train, y_train)
+    test_pool = Pool(X_test, y_test)
+
+    model.fit(
+        train_pool,
+        eval_set=test_pool,
+        early_stopping_rounds=100,
+        callbacks=[pruning_callback],
+        verbose=False
+    )
+
+    # 검증 데이터 예측 및 MAE 계산
+    preds = model.predict(test_pool)
     mae = mean_absolute_error(y_test, preds)
 
     return mae
